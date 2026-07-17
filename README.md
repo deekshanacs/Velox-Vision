@@ -91,6 +91,16 @@ This should print:
 Welcome to Velox Vision 🏎️
 ```
 
+## Development Progress
+- [x] Project Architecture
+- [x] Vehicle Detection Engine
+- [ ] Multi-Object Tracking
+- [ ] Speed Estimation
+- [ ] ANPR
+- [ ] OCR
+- [ ] Violation Detection
+- [ ] Dashboard
+
 ## Future Roadmap
 - [ ] Implement vehicle detection using custom trained YOLOv8 model weights.
 - [ ] Add ByteTrack/DeepSORT integration for tracking unique vehicle IDs.
