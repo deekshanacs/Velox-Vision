@@ -1,1 +1,24 @@
-# Default system and engine parameters configuration
+# Velox Vision Configuration System
+
+detection:
+  # Path to the primary model weights file
+  model_path: "models/weights/yolo11n.pt"
+  
+  # Fallback model weights file if primary fails to load
+  fallback_path: "models/weights/yolov8n.pt"
+  
+  # Confidence threshold filter (0.0 to 1.0)
+  confidence_threshold: 0.30
+  
+  # Target device for running inference ('auto', 'cpu', 'cuda', 'mps')
+  device: "auto"
+  
+  # Enable model warm-up on initialization
+  warmup: true
+  
+  # Target classes to filter for (others will be discarded)
+  classes:
+    - car
+    - motorcycle
+    - bus
+    - truck
