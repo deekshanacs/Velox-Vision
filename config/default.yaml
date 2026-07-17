@@ -90,3 +90,19 @@ tracking:
   visualization:
     show_trails: false
     show_ids: true
+
+memory:
+  # Enable/disable vehicle memory subsystem
+  enabled: true
+  
+  # Max snapshots to store in memory per vehicle track history
+  max_snapshots: 300
+  
+  # Cleanup scan frame interval to clear repository memory records
+  cleanup_interval: 500
+  
+  # Enable aggregate memory statistics logging
+  statistics_enabled: true
+  
+  # Enable tracking of confidence score metrics history
+  confidence_history: true

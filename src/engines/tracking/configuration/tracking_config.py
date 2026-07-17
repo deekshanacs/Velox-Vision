@@ -19,6 +19,13 @@ class TrackingConfiguration:
     frame_rate: float = 25.0
     show_trails: bool = False
     show_ids: bool = True
+    
+    # Memory Subsystem Parameters
+    memory_enabled: bool = True
+    memory_max_snapshots: int = 300
+    memory_cleanup_interval: int = 500
+    memory_statistics_enabled: bool = True
+    memory_confidence_history: bool = True
 
     @classmethod
     def from_settings(cls) -> 'TrackingConfiguration':
@@ -37,5 +44,12 @@ class TrackingConfiguration:
             min_box_area=settings.get("tracking.min_box_area", 10.0),
             frame_rate=settings.get("tracking.frame_rate", 25.0),
             show_trails=settings.get("tracking.visualization.show_trails", False),
-            show_ids=settings.get("tracking.visualization.show_ids", True)
+            show_ids=settings.get("tracking.visualization.show_ids", True),
+            
+            # Memory Loaders
+            memory_enabled=settings.get("memory.enabled", True),
+            memory_max_snapshots=settings.get("memory.max_snapshots", 300),
+            memory_cleanup_interval=settings.get("memory.cleanup_interval", 500),
+            memory_statistics_enabled=settings.get("memory.statistics_enabled", True),
+            memory_confidence_history=settings.get("memory.confidence_history", True)
         )

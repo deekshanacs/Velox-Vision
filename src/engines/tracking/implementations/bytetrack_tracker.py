@@ -8,7 +8,7 @@ from src.engines.tracking.entities.tracking_context import TrackingContext
 from src.engines.tracking.entities.tracking_result import TrackingResult
 from src.engines.tracking.entities.tracked_vehicle import TrackedVehicle
 from src.engines.tracking.entities.track_state import TrackState
-from src.engines.tracking.entities.track_history import TrackSnapshot, TrackHistory
+from src.engines.tracking.memory.memory_manager import MemoryManager
 from src.engines.tracking.metrics.tracking_statistics import TrackingStatistics
 from src.engines.tracking.metrics.performance_metrics import TrackingPerformance
 from src.engines.tracking.adapters.bytetrack_adapter import ByteTrackAdapter
@@ -26,6 +26,7 @@ class ByteTrackTracker(Tracker):
     def __init__(self):
         self._configs: Optional[TrackingConfiguration] = None
         self._adapter: Optional[ByteTrackAdapter] = None
+        self._memory_manager: Optional[MemoryManager] = None
         
         # Local state cache maps track IDs to TrackedVehicle domain entities.
         # This is maintained locally to retain historic trajectories and placeholders
@@ -42,6 +43,7 @@ class ByteTrackTracker(Tracker):
             logger.info("Initializing ByteTrack tracker subsystem...")
             self._configs = configs
             self._adapter = ByteTrackAdapter(configs)
+            self._memory_manager = MemoryManager(configs)
             self._active_tracks.clear()
             self._statistics.reset()
             self._performance.reset()
@@ -88,61 +90,36 @@ class ByteTrackTracker(Tracker):
                 if tid in self._active_tracks:
                     # Retrieve existing domain entity
                     vehicle = self._active_tracks[tid]
-                    vehicle.bbox = bbox
-                    vehicle.confidence = conf
-                    vehicle.last_seen_frame = frame_num
-                    vehicle.track_age += 1
                     
                     # State transitions machine logic
+                    state = TrackState.TENTATIVE
                     if vehicle.state == TrackState.TEMPORARILY_LOST:
-                        vehicle.state = TrackState.RECOVERED
+                        state = TrackState.RECOVERED
                         self._statistics.recovered_tracks += 1
                         logger.debug(f"Track {tid} RECOVERED at frame {frame_num}")
                     elif vehicle.state == TrackState.RECOVERED:
-                        vehicle.state = TrackState.TRACKED
+                        state = TrackState.TRACKED
                     elif vehicle.state == TrackState.TENTATIVE:
-                        if vehicle.track_age >= self._configs.tentative_frames:
-                            vehicle.state = TrackState.CONFIRMED
-                            self._statistics.total_track_age += vehicle.track_age
-                            logger.info(f"Track {tid} CONFIRMED at frame {frame_num} after {vehicle.track_age} frames.")
+                        if (vehicle.track_age + 1) >= self._configs.tentative_frames:
+                            state = TrackState.CONFIRMED
+                            self._statistics.total_track_age += (vehicle.track_age + 1)
+                            logger.info(f"Track {tid} CONFIRMED at frame {frame_num} after {vehicle.track_age + 1} frames.")
+                        else:
+                            state = TrackState.TENTATIVE
                     elif vehicle.state == TrackState.CONFIRMED:
-                        vehicle.state = TrackState.TRACKED
+                        state = TrackState.TRACKED
+                    else:
+                        state = vehicle.state
                     
-                    # Store track snapshot (no velocity/speed calculations)
-                    snap = TrackSnapshot(
-                        frame_number=frame_num,
-                        timestamp=timestamp,
-                        center=vehicle.center,
-                        bbox=bbox,
-                        confidence=conf,
-                        state=vehicle.state
-                    )
-                    vehicle.history.append(snap)
+                    # Delegate update to memory manager
+                    self._memory_manager.update_memory(tid, frame_num, timestamp, bbox, conf, state)
                 else:
-                    # Instantiated new vehicle trajectory in tentative state
-                    history = TrackHistory(max_size=self._configs.history_size)
-                    vehicle = TrackedVehicle(
-                        track_id=tid,
-                        class_name=cname,
-                        class_id=cid,
-                        bbox=bbox,
-                        confidence=conf,
-                        state=TrackState.TENTATIVE,
-                        first_seen_frame=frame_num,
-                        last_seen_frame=frame_num,
-                        track_age=1,
-                        history=history
-                    )
+                    # Instantiate new vehicle trajectory with memory
+                    memory = self._memory_manager.create_memory(tid, cname, cid, frame_num, timestamp, bbox, conf)
+                    vehicle = TrackedVehicle(track_id=tid, memory=memory)
                     
-                    snap = TrackSnapshot(
-                        frame_number=frame_num,
-                        timestamp=timestamp,
-                        center=vehicle.center,
-                        bbox=bbox,
-                        confidence=conf,
-                        state=TrackState.TENTATIVE
-                    )
-                    vehicle.history.append(snap)
+                    # Store first observation snapshot
+                    self._memory_manager.update_memory(tid, frame_num, timestamp, bbox, conf, TrackState.TENTATIVE)
                     
                     self._active_tracks[tid] = vehicle
                     self._statistics.tracks_created += 1
@@ -157,29 +134,22 @@ class ByteTrackTracker(Tracker):
                     frames_lost = frame_num - vehicle.last_seen_frame
                     if frames_lost > self._configs.max_lost_frames:
                         # Exceeded lost buffer retention threshold, delete track
-                        vehicle.state = TrackState.REMOVED
+                        state = TrackState.REMOVED
                         self._statistics.tracks_removed += 1
                         lost_ids.append(tid)
                         logger.info(f"Track {tid} REMOVED after exceeding {self._configs.max_lost_frames} lost frames.")
                     else:
                         # Transition to Temporarily Lost status
+                        state = TrackState.TEMPORARILY_LOST
                         if vehicle.state != TrackState.TEMPORARILY_LOST:
-                            vehicle.state = TrackState.TEMPORARILY_LOST
                             self._statistics.tracks_lost += 1
                             logger.debug(f"Track {tid} marked as TEMPORARILY_LOST at frame {frame_num}")
                         
-                        snap = TrackSnapshot(
-                            frame_number=frame_num,
-                            timestamp=timestamp,
-                            center=vehicle.center,
-                            bbox=vehicle.bbox,
-                            confidence=vehicle.confidence,
-                            state=TrackState.TEMPORARILY_LOST
-                        )
-                        vehicle.history.append(snap)
+                    self._memory_manager.update_memory(tid, frame_num, timestamp, vehicle.bbox, vehicle.confidence, state)
 
             for tid in lost_ids:
                 del self._active_tracks[tid]
+                self._memory_manager.repository.remove(tid)
 
             # 4. Telemetry tracking latencies and output packing
             reconcile_latency = (time.perf_counter() - start_tracking_time) * 1000.0
@@ -212,6 +182,8 @@ class ByteTrackTracker(Tracker):
         """Resets the tracker adapter, local state repositories, and statistics counters."""
         if self._adapter is not None:
             self._adapter.reset()
+        if self._memory_manager is not None:
+            self._memory_manager.repository.clear()
         self._active_tracks.clear()
         self._statistics.reset()
         self._performance.reset()
