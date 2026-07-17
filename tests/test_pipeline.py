@@ -28,7 +28,15 @@ class TestPipelineAndVisualization(unittest.TestCase):
         """Verify draw_metadata_label executes without errors on dummy frame."""
         frame = np.zeros((100, 100, 3), dtype=np.uint8)
         color = (0, 255, 0)
-        draw_metadata_label(frame, "TEST LABEL", (10, 50), bg_color=color)
+        draw_metadata_label(
+            img=frame,
+            class_name="car",
+            confidence=0.92,
+            position=(10, 50),
+            bg_color=color,
+            thickness=1,
+            font_scale=0.4
+        )
         
         self.assertTrue(np.any(frame > 0))
 
@@ -46,11 +54,16 @@ class TestPipelineAndVisualization(unittest.TestCase):
         draw_hud_dashboard(
             img=frame,
             metrics=metrics,
-            model_name="yolo11n.pt",
+            model_name="models/weights/yolo11n.pt",
+            device_name="CPU",
             frame_number=100,
             total_frames=300,
-            detected_count=5,
-            avg_inference_ms=10.0
+            active_breakdown={"car": 2, "bus": 0, "truck": 1, "motorcycle": 0},
+            avg_fps=30.0,
+            avg_inference_ms=10.0,
+            elapsed_sec=3.3,
+            eta_sec=6.6,
+            video_fps=25.0
         )
         
         self.assertTrue(np.any(frame > 0))
@@ -66,7 +79,7 @@ class TestPipelineAndVisualization(unittest.TestCase):
         
         # Check properties are correctly bound
         self.assertEqual(runner.model_path, "models/weights/yolo11n.pt")
-        self.assertAlmostEqual(runner.confidence_threshold, 0.30)
+        self.assertAlmostEqual(runner.confidence_threshold, 0.50)
         self.assertEqual(runner.classes, ["car", "motorcycle", "bus", "truck"])
         self.assertIs(runner.detector, mock_detector_instance)
 

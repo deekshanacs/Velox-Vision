@@ -91,14 +91,18 @@ This should print:
 Welcome to Velox Vision 🏎️
 ```
 
-## Development Progress
+## 🚀 Development Progress
+
 - [x] Project Architecture
+- [x] Environment Setup
+- [x] YOLO11 Integration
 - [x] Vehicle Detection Engine
+- [x] Detection Validation Runner
 - [ ] Multi-Object Tracking
 - [ ] Speed Estimation
-- [ ] ANPR
+- [ ] License Plate Recognition
 - [ ] OCR
-- [ ] Violation Detection
+- [ ] Traffic Violations
 - [ ] Dashboard
 
 ## Future Roadmap

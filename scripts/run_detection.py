@@ -2,10 +2,12 @@ import os
 import sys
 import time
 import glob
+import uuid
+import json
 import logging
 import cv2
 import numpy as np
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 # Add project root to sys.path to resolve imports correctly
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -15,8 +17,16 @@ if project_root not in sys.path:
 from config.settings import settings
 from src.engines.vehicle_detection.detector_factory import VehicleDetectorFactory
 from src.engines.vehicle_detection.exceptions import DetectionError
-from src.core.entities import DetectionResult
-from src.utils.visualization import draw_rounded_rectangle, draw_metadata_label, draw_hud_dashboard
+from src.core.entities import DetectionResult, BoundingBox, VehicleDetection
+from src.utils.visualization import (
+    draw_rounded_rectangle,
+    draw_metadata_label,
+    draw_hud_dashboard,
+    get_friendly_model_name,
+    get_resolution_scaling,
+    CLASS_COLORS,
+    DEFAULT_COLOR
+)
 
 # Configure logging style
 logging.basicConfig(
@@ -26,18 +36,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("run_detection")
 
-# Class-specific colors for drawing annotations (BGR format)
-CLASS_COLORS = {
-    "car": (225, 140, 20),         # Azure / Bright Blue
-    "motorcycle": (75, 215, 75),   # Lime Green
-    "bus": (20, 110, 230),         # Warm Orange
-    "truck": (210, 40, 210)        # Violet / Purple
-}
-DEFAULT_COLOR = (130, 130, 130)    # Gray for unidentified objects
-
 
 class DetectionRunner:
-    """Production-grade verification runner to benchmark and visualize vehicle detections."""
+    """Polished production-grade verification runner to benchmark vehicle detections (v0.2.0)."""
 
     def __init__(self):
         """Initializes configs, logs directories, and constructs the vehicle detector."""
@@ -46,28 +47,51 @@ class DetectionRunner:
         self.output_dir = settings.get("runner.output_dir", "outputs/processed_videos/")
         self.show_preview = settings.get("runner.show_preview", True)
         self.save_output = settings.get("runner.save_output", True)
+        
+        # New Phase 2 Polish Configurations
+        self.frame_skip = int(settings.get("runner.frame_skip", 1))
+        self.benchmark_mode = settings.get("runner.benchmark", False)
+        self.min_height_ratio = float(settings.get("filtering.min_height_ratio", 0.005))
+        self.reports_dir = settings.get("reports.output_dir", "outputs/reports/")
+        self.save_summary = settings.get("reports.save_summary", True)
+        self.snapshots_dir = settings.get("snapshots.output_dir", "outputs/snapshots/")
 
         # Resolve video path with folder fallbacks if missing
         self.video_path = self._resolve_video_path(self.input_config)
         
         # Detector configuration parameters
         self.model_path = settings.get("detection.model_path", "models/weights/yolo11n.pt")
-        self.confidence_threshold = settings.get("detection.confidence_threshold", 0.30)
+        self.confidence_threshold = float(settings.get("detection.confidence_threshold", 0.50))
+        self.iou_threshold = float(settings.get("detection.iou_threshold", 0.45))
         self.device = settings.get("detection.device", "auto")
         self.warmup = settings.get("detection.warmup", True)
         self.classes = settings.get("detection.classes", ["car", "motorcycle", "bus", "truck"])
 
-        # Instantiate target detector engine
+        # Instantiate target detector engine and profile warm-up duration
         logger.info("Initializing Vehicle Detection Engine via factory...")
+        start_warmup = time.perf_counter()
+        
         self.detector = VehicleDetectorFactory.create_detector(
             detector_type="yolo",
             model_path=self.model_path,
             confidence_threshold=self.confidence_threshold,
+            iou_threshold=self.iou_threshold,
             device=self.device,
             warmup=self.warmup,
             classes=self.classes
         )
-        logger.info("Detector engine initialized successfully.")
+        
+        self.warmup_time = time.perf_counter() - start_warmup
+        logger.info(f"Detector engine initialized. Warmup duration: {self.warmup_time:.2f} seconds.")
+
+        # Centralize metrics storage
+        self.peak_fps = 0.0
+        self.confidence_totals = {"high_gt_90": 0, "medium_70_90": 0, "low_50_70": 0}
+        self.vehicles_breakdown = {"car": 0, "bus": 0, "truck": 0, "motorcycle": 0}
+        self.class_conf_sums = {"car": 0.0, "bus": 0.0, "truck": 0.0, "motorcycle": 0.0}
+        
+        # Friendly device mapping
+        self.device_presentation = self.detector.device.upper() if hasattr(self.detector, 'device') else "CPU"
 
     def _resolve_video_path(self, requested_path: str) -> str:
         """Validates input path or searches default folders for video fallbacks."""
@@ -91,7 +115,7 @@ class DetectionRunner:
             )
             return fallback_video
 
-        return requested_path  # Bubbles up path issue to standard OpenCV validator
+        return requested_path
 
     def _generate_output_path(self, input_path: str) -> str:
         """Generates processed output path based on base input video name."""
@@ -99,15 +123,84 @@ class DetectionRunner:
         base_name = os.path.splitext(os.path.basename(input_path))[0]
         ext = os.path.splitext(input_path)[1]
         if not ext:
-            ext = ".mp4" # Fallback extension
+            ext = ".mp4"
         return os.path.join(self.output_dir, f"{base_name}_detected{ext}")
+
+    def _get_git_info(self) -> Dict[str, str]:
+        """Retrieves active Git commit hash and branch name dynamically."""
+        import subprocess
+        git_info = {"commit": "N/A", "branch": "N/A"}
+        try:
+            commit = subprocess.check_output(
+                ["git", "rev-parse", "--short", "HEAD"],
+                stderr=subprocess.DEVNULL
+            ).decode().strip()
+            branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                stderr=subprocess.DEVNULL
+            ).decode().strip()
+            git_info["commit"] = commit
+            git_info["branch"] = branch
+        except Exception:
+            pass
+        return git_info
+
+    def _get_hardware_info(self) -> Dict[str, str]:
+        """Queries CPU specs, memory capacity, and logical cores via system shell."""
+        import platform
+        import os
+        import subprocess
+        
+        hardware = {
+            "processor": platform.processor() or "Unknown Processor",
+            "threads": str(os.cpu_count() or 1),
+            "ram": "Unknown RAM"
+        }
+        
+        if platform.system() == "Windows":
+            try:
+                # CPU Name query
+                cpu_out = subprocess.check_output(
+                    "wmic cpu get name",
+                    shell=True,
+                    stderr=subprocess.DEVNULL
+                ).decode().strip()
+                cpu_lines = [l.strip() for l in cpu_out.split('\n') if l.strip()]
+                if len(cpu_lines) > 1:
+                    hardware["processor"] = cpu_lines[1]
+                    
+                # RAM Capacity query
+                ram_out = subprocess.check_output(
+                    "wmic computersystem get totalphysicalmemory",
+                    shell=True,
+                    stderr=subprocess.DEVNULL
+                ).decode().strip()
+                ram_lines = [l.strip() for l in ram_out.split('\n') if l.strip()]
+                if len(ram_lines) > 1:
+                    ram_bytes = int(ram_lines[1])
+                    hardware["ram"] = f"{ram_bytes / (1024**3):.1f} GB"
+            except Exception:
+                pass
+        return hardware
+
+    def _get_friendly_resolution(self, w: int, h: int) -> str:
+        """Returns standard resolution strings mapped to their display tags."""
+        res_map = {
+            (1280, 720): "HD",
+            (1920, 1080): "Full HD",
+            (2560, 1440): "QHD",
+            (3840, 2160): "4K UHD"
+        }
+        friendly = res_map.get((w, h), "")
+        if friendly:
+            return f"{w} \u00d7 {h} ({friendly})"
+        return f"{w} \u00d7 {h}"
 
     def run(self) -> None:
         """Runs the main frame processing execution loop."""
         logger.info(f"Opening target video stream: '{self.video_path}'")
         cap = cv2.VideoCapture(self.video_path)
         
-        # Verify capture source opens
         if not cap.isOpened():
             logger.error(f"Failed to open video file: '{self.video_path}'")
             return
@@ -118,11 +211,11 @@ class DetectionRunner:
         vid_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         
-        # Guard against zero division/properties errors
         if vid_fps <= 0:
             vid_fps = 30.0
 
-        logger.info(f"Video Loaded - Resolution: {vid_width}x{vid_height} | FPS: {vid_fps} | Frames: {total_frames}")
+        resolution_str = self._get_friendly_resolution(vid_width, vid_height)
+        logger.info(f"Video Loaded - Resolution: {resolution_str} | FPS: {vid_fps} | Frames: {total_frames}")
 
         # Setup Video Writer
         writer = None
@@ -130,24 +223,29 @@ class DetectionRunner:
         if self.save_output:
             output_path = self._generate_output_path(self.video_path)
             logger.info(f"Annotated video will be saved to: '{output_path}'")
-            # Use standard MP4V codec for portability
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            writer = cv2.VideoWriter(output_path, fourcc, vid_fps, (vid_width, vid_height))
+            writer = cv2.VideoWriter(output_path, fourcc, vid_fps / self.frame_skip, (vid_width, vid_height))
 
         # Runtime telemetry variables
         processed_frames = 0
-        total_vehicles_seen = 0
+        total_detections_count = 0
         sum_inference_ms = 0.0
         start_runtime = time.perf_counter()
+        
+        last_frame = None
 
         logger.info("Starting frame processing loop. Press 'q' or 'Ctrl+C' to exit.")
 
         try:
             while cap.isOpened():
+                frame_id = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
                 ret, frame = cap.read()
                 if not ret:
-                    logger.info("Reached end of video stream or unreadable frame.")
                     break
+
+                # Frame skipping logic
+                if frame_id % self.frame_skip != 0:
+                    continue
 
                 # Execute detection
                 try:
@@ -157,38 +255,96 @@ class DetectionRunner:
                     continue
 
                 processed_frames += 1
-                total_vehicles_seen += len(result.detections)
+
+                # Filter detections based on height ratio and track statistics
+                filtered_detections: List[VehicleDetection] = []
+                active_breakdown = {"car": 0, "bus": 0, "truck": 0, "motorcycle": 0}
+                
+                for det in result.detections:
+                    h_px = det.bbox.height
+                    # Min height check: scale dynamically based on frame size
+                    if h_px < self.min_height_ratio * vid_height:
+                        continue
+                        
+                    filtered_detections.append(det)
+                    
+                    # Accumulate class breakdowns
+                    c_name = det.class_name.lower()
+                    if c_name in active_breakdown:
+                        active_breakdown[c_name] += 1
+                        self.vehicles_breakdown[c_name] += 1
+                        self.class_conf_sums[c_name] += det.confidence
+
+                    # Accumulate confidence distributions
+                    conf = det.confidence
+                    if conf > 0.90:
+                        self.confidence_totals["high_gt_90"] += 1
+                    elif conf >= 0.70:
+                        self.confidence_totals["medium_70_90"] += 1
+                    else:
+                        self.confidence_totals["low_50_70"] += 1
+
+                total_detections_count += len(filtered_detections)
                 sum_inference_ms += result.metrics.inference_time_ms
+
+                # Peak FPS calculations
+                if result.metrics.fps > self.peak_fps:
+                    self.peak_fps = result.metrics.fps
 
                 # Render annotations
                 avg_inf_time = sum_inference_ms / processed_frames
-                self._render_frame_annotations(frame, result, total_frames, avg_inf_time)
+                elapsed_sec = time.perf_counter() - start_runtime
+                avg_fps = processed_frames / elapsed_sec if elapsed_sec > 0 else 0.0
+                
+                # Calculate ETA based on average processing rate
+                eta_sec = -1.0
+                if avg_fps > 0 and total_frames > 0:
+                    remaining_frames = (total_frames / self.frame_skip) - processed_frames
+                    eta_sec = max(0.0, remaining_frames / avg_fps)
+
+                # Overlay drawings on frame
+                self._render_frame_annotations(
+                    frame=frame,
+                    detections=filtered_detections,
+                    metrics=result.metrics,
+                    frame_number=processed_frames * self.frame_skip,
+                    total_frames=total_frames,
+                    active_breakdown=active_breakdown,
+                    avg_fps=avg_fps,
+                    avg_inf_time=avg_inf_time,
+                    elapsed_sec=elapsed_sec,
+                    eta_sec=eta_sec,
+                    video_fps=vid_fps
+                )
+
+                last_frame = frame.copy()
 
                 # Save Frame
                 if writer is not None:
                     writer.write(frame)
 
-                # Show Preview Window
-                if self.show_preview:
-                    window_name = "Velox Vision - Detection Preview"
-                    cv2.imshow(window_name, frame)
-                    # Check key press for interrupt ('q')
-                    if cv2.waitKey(1) & 0xFF == ord('q'):
-                        logger.info("Execution interrupted by user key press ('q').")
-                        break
+                # Show Preview Window (skipped if benchmark_mode is enabled)
+                if self.show_preview and not self.benchmark_mode:
+                    try:
+                        cv2.imshow("Velox Vision - Detection Preview", frame)
+                        if cv2.waitKey(1) & 0xFF == ord('q'):
+                            logger.info("Execution interrupted by user key press ('q').")
+                            break
+                    except Exception as e:
+                        logger.warning(f"Could not display preview window (running headless/no GUI): {e}")
+                        self.show_preview = False  # Disable for remainder of run
 
-                # Log progress periodic checkpoints
+                # Progress checkpoints logging
                 if processed_frames % 50 == 0:
-                    percent = (processed_frames / total_frames * 100) if total_frames > 0 else 0
+                    percent = (processed_frames * self.frame_skip / total_frames * 100) if total_frames > 0 else 0
                     logger.info(
-                        f"Processed {processed_frames}/{total_frames} frames "
-                        f"({percent:.1f}%) | Active Detections: {len(result.detections)}"
+                        f"Processed {processed_frames}/{int(total_frames/self.frame_skip)} frames "
+                        f"({percent:.1f}%) | Active Detections: {len(filtered_detections)}"
                     )
 
         except KeyboardInterrupt:
             logger.info("Execution interrupted by keyboard command (Ctrl+C).")
         finally:
-            # Release resources
             cap.release()
             if writer is not None:
                 writer.release()
@@ -199,88 +355,184 @@ class DetectionRunner:
         total_runtime = time.perf_counter() - start_runtime
         average_fps = processed_frames / total_runtime if total_runtime > 0 else 0.0
         avg_inf_ms = sum_inference_ms / processed_frames if processed_frames > 0 else 0.0
+        
+        # Save snapshot of last frame
+        if last_frame is not None:
+            os.makedirs(self.snapshots_dir, exist_ok=True)
+            snapshot_path = os.path.join(self.snapshots_dir, "final_frame.png")
+            cv2.imwrite(snapshot_path, last_frame)
+            logger.info(f"Final preview frame snapshot exported to: '{snapshot_path}'")
 
-        # Print final report
-        self._print_performance_report(
-            input_video=self.video_path,
-            output_video=output_path,
-            resolution=f"{vid_width}x{vid_height}",
-            fps=vid_fps,
+        # Generate summary report exports
+        self._generate_execution_reports(
+            vid_fps=vid_fps,
+            resolution_str=resolution_str,
             frames_processed=processed_frames,
-            vehicles_detected=total_vehicles_seen,
+            vehicles_detected=total_detections_count,
             avg_fps=average_fps,
             avg_inf_time=avg_inf_ms,
-            total_runtime=total_runtime,
-            model_name=self.model_path
+            total_runtime=total_runtime
         )
 
     def _render_frame_annotations(
         self,
         frame: np.ndarray,
-        result: DetectionResult,
+        detections: List[VehicleDetection],
+        metrics,
+        frame_number: int,
         total_frames: int,
-        avg_inference_ms: float
+        active_breakdown: Dict[str, int],
+        avg_fps: float,
+        avg_inf_time: float,
+        elapsed_sec: float,
+        eta_sec: float,
+        video_fps: float
     ) -> None:
         """Renders bounding boxes, labels, and the dashboard HUD on the active frame."""
+        h, w, _ = frame.shape
+        thickness, font_scale, _ = get_resolution_scaling(h)
+
         # 1. Draw vehicle bounding boxes and class metadata labels
-        for det in result.detections:
+        for det in detections:
             color = CLASS_COLORS.get(det.class_name, DEFAULT_COLOR)
             
-            # Extract box corners
             x1, y1, x2, y2 = det.bbox.x1, det.bbox.y1, det.bbox.x2, det.bbox.y2
             pt1 = (int(x1), int(y1))
             pt2 = (int(x2), int(y2))
             
             # Draw rounded box
-            draw_rounded_rectangle(frame, pt1, pt2, color, thickness=2, r=10)
+            draw_rounded_rectangle(frame, pt1, pt2, color, thickness=thickness, r=8)
             
-            # Create label string: e.g. "CAR 89%"
-            label_text = f"{det.class_name.upper()} {int(det.confidence * 100)}%"
-            label_pos = (pt1[0], pt1[1] - 5 if pt1[1] > 20 else pt1[1] + 15)
+            # Position label cleanly on bounding box top border
+            label_pos = (pt1[0], pt1[1] - 5 if pt1[1] > 25 else pt1[1] + 15)
             
             # Draw metadata box label
-            draw_metadata_label(frame, label_text, label_pos, bg_color=color)
+            draw_metadata_label(
+                frame,
+                class_name=det.class_name,
+                confidence=det.confidence,
+                position=label_pos,
+                bg_color=color,
+                thickness=max(1, thickness - 1),
+                font_scale=font_scale
+            )
 
         # 2. Draw transparency HUD Dashboard at top of the frame
         draw_hud_dashboard(
             img=frame,
-            metrics=result.metrics,
-            model_name=result.model_name,
-            frame_number=result.frame_number,
+            metrics=metrics,
+            model_name=self.model_path,
+            device_name=self.device_presentation,
+            frame_number=frame_number,
             total_frames=total_frames,
-            detected_count=len(result.detections),
-            avg_inference_ms=avg_inference_ms
+            active_breakdown=active_breakdown,
+            avg_fps=avg_fps,
+            avg_inference_ms=avg_inf_time,
+            elapsed_sec=elapsed_sec,
+            eta_sec=eta_sec,
+            video_fps=video_fps
         )
 
-    def _print_performance_report(
+    def _generate_execution_reports(
         self,
-        input_video: str,
-        output_video: str,
-        resolution: str,
-        fps: float,
+        vid_fps: float,
+        resolution_str: str,
         frames_processed: int,
         vehicles_detected: int,
         avg_fps: float,
         avg_inf_time: float,
-        total_runtime: float,
-        model_name: str
+        total_runtime: float
     ) -> None:
-        """Prints a structured execution summary to stdout."""
-        border = "=" * 45
+        """Computes summary files, logs JSON reports, and prints final benchmark stdout."""
+        # Calculate class-wise confidence averages
+        class_conf_averages = {}
+        for c, s_val in self.class_conf_sums.items():
+            cnt = self.vehicles_breakdown[c]
+            class_conf_averages[c] = f"{int((s_val / cnt) * 100)}%" if cnt > 0 else "0%"
+
+        total_breakdown_count = sum(self.vehicles_breakdown.values())
+        overall_avg_conf = (
+            int((sum(self.class_conf_sums.values()) / total_breakdown_count) * 100)
+            if total_breakdown_count > 0 else 0
+        )
+
+        avg_vehicles_per_frame = vehicles_detected / frames_processed if frames_processed > 0 else 0.0
+
+        # Retrieve Git metadata
+        git_info = self._get_git_info()
+        
+        # Retrieve Hardware specifications
+        hw_info = self._get_hardware_info()
+
+        # Build execution report dict
+        report_id = uuid.uuid4().hex[:8]
+        timestamp_str = time.strftime("%Y-%m-%d_%H-%M-%S")
+        
+        report_data = {
+            "benchmark_id": report_id,
+            "timestamp": timestamp_str,
+            "git": git_info,
+            "hardware": hw_info,
+            "settings": {
+                "confidence_threshold": self.confidence_threshold,
+                "iou_threshold": self.iou_threshold,
+                "frame_skip": self.frame_skip,
+                "min_height_ratio": self.min_height_ratio
+            },
+            "metrics": {
+                "runtime_seconds": round(total_runtime, 2),
+                "avg_fps": round(avg_fps, 1),
+                "peak_fps": round(self.peak_fps, 1),
+                "avg_latency_ms": round(avg_inf_time, 1),
+                "warmup_seconds": round(self.warmup_time, 2)
+            },
+            "vehicles": self.vehicles_breakdown,
+            "avg_vehicles_per_frame": round(avg_vehicles_per_frame, 1),
+            "confidence_distribution": self.confidence_totals,
+            "average_confidence": f"{overall_avg_conf}%",
+            "confidence_by_class": class_conf_averages
+        }
+
+        # Save summary report to timestamped JSON file
+        report_path = "N/A"
+        if self.save_summary:
+            os.makedirs(self.reports_dir, exist_ok=True)
+            report_path = os.path.join(self.reports_dir, f"{timestamp_str}_summary.json")
+            try:
+                with open(report_path, "w") as f:
+                    json.dump(report_data, f, indent=4)
+                logger.info(f"Execution summary report successfully saved to: '{report_path}'")
+            except Exception as e:
+                logger.error(f"Failed to write execution report file: {e}")
+
+        # Print structured final benchmark table to stdout
+        model_friendly = get_friendly_model_name(self.model_path)
+        border = "=" * 41
         print(f"\n{border}")
-        print("        Velox Vision Detection Report")
+        print("        VELOX VISION v0.2.0")
         print(border)
-        print(f"Input Video:            {input_video}")
-        print(f"Output Video:           {output_video}")
-        print(f"Resolution:             {resolution}")
-        print(f"Video Frame Rate (FPS): {fps:.1f}")
-        print(f"Frames Processed:       {frames_processed}")
-        print(f"Total Detections Logged:{vehicles_detected}")
-        print(f"Average Execution FPS:  {avg_fps:.1f}")
-        print(f"Average Inference Time: {avg_inf_time:.1f} ms")
-        print(f"Total Runtime:          {total_runtime:.2f} seconds")
-        print(f"Model File:             {model_name}")
-        print(f"{border}\n")
+        print(f"Model                    {model_friendly}")
+        print(f"Device                   {self.device_presentation}")
+        print(f"Resolution               {resolution_str}")
+        print(f"Frames                   {frames_processed}")
+        print(f"Runtime                  {total_runtime:.1f} s")
+        print(f"Average FPS              {avg_fps:.1f}")
+        print(f"Peak FPS                 {self.peak_fps:.1f}")
+        print(f"Average Latency          {avg_inf_time:.1f} ms")
+        print(f"Warmup                   {self.warmup_time:.2f} s")
+        print(f"\nVehicles")
+        print(f"  Cars                   {self.vehicles_breakdown.get('car', 0)}")
+        print(f"  Bus                    {self.vehicles_breakdown.get('bus', 0)}")
+        print(f"  Truck                  {self.vehicles_breakdown.get('truck', 0)}")
+        print(f"  Motorcycle             {self.vehicles_breakdown.get('motorcycle', 0)}")
+        print(f"\nAverage Vehicles/Frame   {avg_vehicles_per_frame:.1f}")
+        print(f"\nConfidence")
+        print(f"  Cars                   {class_conf_averages.get('car', '0%')}")
+        print(f"  Bus                    {class_conf_averages.get('bus', '0%')}")
+        print(f"  Truck                  {class_conf_averages.get('truck', '0%')}")
+        print(f"  Motorcycle             {class_conf_averages.get('motorcycle', '0%')}")
+        print(f"\nReport                   {report_path}")
+        print(border)
 
 
 if __name__ == "__main__":

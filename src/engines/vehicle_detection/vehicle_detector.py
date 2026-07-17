@@ -27,6 +27,7 @@ class YOLOVehicleDetector(IVehicleDetector):
         self,
         model_path: Optional[str] = None,
         confidence_threshold: Optional[float] = None,
+        iou_threshold: Optional[float] = None,
         device: Optional[str] = None,
         warmup: Optional[bool] = None,
         classes: Optional[List[str]] = None
@@ -36,6 +37,7 @@ class YOLOVehicleDetector(IVehicleDetector):
         Args:
             model_path: Path to model weights file. Resolves from settings if None.
             confidence_threshold: Confidence boundary value. Resolves from settings if None.
+            iou_threshold: NMS overlap threshold. Resolves from settings if None.
             device: Computing hardware target ('auto', 'cpu', 'cuda', 'mps'). Resolves from settings if None.
             warmup: Enable/disable warm-up pass on load. Resolves from settings if None.
             classes: Target vehicle classes to filter. Resolves from settings if None.
@@ -43,7 +45,8 @@ class YOLOVehicleDetector(IVehicleDetector):
         # Resolve configurations
         self.model_path = model_path or settings.get("detection.model_path", "models/weights/yolo11n.pt")
         self.fallback_path = settings.get("detection.fallback_path", "models/weights/yolov8n.pt")
-        self.confidence_threshold = confidence_threshold or settings.get("detection.confidence_threshold", 0.30)
+        self.confidence_threshold = confidence_threshold or settings.get("detection.confidence_threshold", 0.50)
+        self.iou_threshold = iou_threshold or settings.get("detection.iou_threshold", 0.45)
         self.warmup_enabled = warmup if warmup is not None else settings.get("detection.warmup", True)
         
         # Configure target classes & IDs dynamically
@@ -92,6 +95,7 @@ class YOLOVehicleDetector(IVehicleDetector):
         logger.info(f"Model Path:         {self.model_path}")
         logger.info(f"Target Device:      {self.device.upper()}")
         logger.info(f"Confidence Limit:   {self.confidence_threshold:.2f}")
+        logger.info(f"IoU Threshold NMS:  {self.iou_threshold:.2f}")
         logger.info(f"Filtering Classes:  {', '.join(self.classes_to_detect)}")
         logger.info(f"Warm-Up Enabled:    {self.warmup_enabled}")
         logger.info(f"{border}")
@@ -123,6 +127,7 @@ class YOLOVehicleDetector(IVehicleDetector):
                 source=dummy_frame,
                 classes=self.target_class_ids,
                 conf=self.confidence_threshold,
+                iou=self.iou_threshold,
                 device=self.device,
                 verbose=False
             )
@@ -160,6 +165,7 @@ class YOLOVehicleDetector(IVehicleDetector):
                 source=frame,
                 classes=self.target_class_ids,
                 conf=self.confidence_threshold,
+                iou=self.iou_threshold,
                 device=self.device,
                 verbose=False
             )

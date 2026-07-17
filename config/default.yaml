@@ -8,7 +8,10 @@ detection:
   fallback_path: "models/weights/yolov8n.pt"
   
   # Confidence threshold filter (0.0 to 1.0)
-  confidence_threshold: 0.30
+  confidence_threshold: 0.50
+
+  # Intersection over Union (IoU) threshold for Non-Maximum Suppression (NMS)
+  iou_threshold: 0.45
   
   # Target device for running inference ('auto', 'cpu', 'cuda', 'mps')
   device: "auto"
@@ -30,8 +33,29 @@ runner:
   # Target output directory
   output_dir: "outputs/processed_videos/"
   
-  # Display OpenCV preview window during execution
+  # Display OpenCV preview window during execution (ignored if benchmark is true)
   show_preview: true
   
   # Save the annotated frames to output video file
   save_output: true
+
+  # Process every N-th frame (1 = process every frame, 2 = process every 2nd frame, etc.)
+  frame_skip: 1
+
+  # Disable visualization previews and render frames as fast as possible
+  benchmark: false
+
+filtering:
+  # Discard vehicle detections whose height is less than this ratio of the frame height
+  min_height_ratio: 0.005
+
+reports:
+  # Folder to store benchmark run summary reports
+  output_dir: "outputs/reports/"
+  
+  # Save JSON summary logs
+  save_summary: true
+
+snapshots:
+  # Folder to save the final frame visual preview
+  output_dir: "outputs/snapshots/"

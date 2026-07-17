@@ -13,6 +13,7 @@ class VehicleDetectorFactory:
         detector_type: str = "yolo",
         model_path: Optional[str] = None,
         confidence_threshold: Optional[float] = None,
+        iou_threshold: Optional[float] = None,
         device: Optional[str] = None,
         warmup: Optional[bool] = None,
         classes: Optional[List[str]] = None
@@ -23,6 +24,7 @@ class VehicleDetectorFactory:
             detector_type: Class string type ('yolo' or custom implementations).
             model_path: Model weights file path override.
             confidence_threshold: Confidence minimum filter boundary override.
+            iou_threshold: Overlap intersection threshold override for NMS.
             device: Computing device override.
             warmup: Warm-up override.
             classes: Target classes list override.
@@ -39,6 +41,7 @@ class VehicleDetectorFactory:
             return YOLOVehicleDetector(
                 model_path=model_path,
                 confidence_threshold=confidence_threshold,
+                iou_threshold=iou_threshold,
                 device=device,
                 warmup=warmup,
                 classes=classes
