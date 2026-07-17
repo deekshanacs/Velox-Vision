@@ -1,53 +1,113 @@
-# Velox-Vision
+# Velox Vision
 
-Velox-Vision is a clean, scalable, production-grade AI-powered intelligent traffic monitoring and speed enforcement platform.
+Velox Vision is a production-grade, AI-powered intelligent traffic monitoring and speed enforcement platform built using Clean Architecture principles.
 
 ## Features
-- **Vehicle Detection Engine**: Identifies vehicles in real-time video frames.
-- **Multi-Object Tracking Engine**: Tracks multiple vehicles across frames sequentially.
-- **Speed Estimation Engine**: Estimates vehicle speed using pixel-to-meter and camera perspective calculations.
-- **License Plate Detection & OCR Engine**: Detects license plates and performs OCR to capture plate texts.
-- **Violation Detection Engine**: Evaluates tracking history to flags overspeeding and other traffic violations.
-- **Evidence Capture Service**: Records snapshots and footage clips of violations.
-- **Streamlit Dashboard**: A dashboard to review real-time logs, analytics, and violation records.
+- **Vehicle Detection**: Real-time object detection optimized for vehicular traffic (cars, trucks, motorcycles, buses).
+- **Multi Object Tracking**: Seamless vehicle tracking across frames with unique ID assignment.
+- **Speed Estimation**: Mathematical speed calculation based on pixel displacement and camera perspective calibration.
+- **License Plate Detection**: Automated detection of vehicle license plate areas.
+- **OCR (Optical Character Recognition)**: Extracting alphanumeric text characters from detected license plates.
+- **Overspeed Detection**: Automatic speed threshold checking to flag speeding violations.
+- **Evidence Capture**: Automated visual snapshot capture and logging of violating vehicles.
+- **CSV Logging**: Continuous logging of all tracked vehicle metrics, speeds, and violations.
+- **Streamlit Dashboard**: A web-based graphical interface for real-time telemetry, analytics, and violation reviews.
 
-## Project Structure
+## Architecture
+This project is built using **Clean Architecture** principles to separate core domain business logic from external frameworks, model models, and visualization tools:
+- **Core (Domain)**: Independent core entities and contract interfaces defining engine capabilities.
+- **Engines (Application Logic)**: Specialized AI engines implementing specific tasks (vehicle detection, tracking, speed, OCR, etc.).
+- **Services (Infrastructure)**: Outward integrations for logging, telemetry storage, and evidence files.
+- **Pipeline (Orchestration)**: Integrator module that processes video streams, runs engines sequentially, and pushes metrics to services.
+- **Presentation (Dashboard)**: Streamlit application displaying real-time statistics, violation records, and reports.
 
+## Folder Structure
 ```
 Velox-Vision/
-├── config/                     # Configuration schemas & default values
+├── config/                     # Configuration files & setting loaders
 │   ├── settings.py             # Config settings loader
-│   ├── default.yaml            # Default system & model parameters
-│   └── logging.yaml            # Logging config schema
-├── dashboard/                  # Streamlit dashboard interface
-│   ├── app.py                  # Entrypoint for the web GUI
-│   ├── pages/                  # Multipage analytics and settings views
+│   ├── default.yaml            # Default system parameters
+│   └── logging.yaml            # Logging configurations
+├── dashboard/                  # Streamlit application UI
+│   ├── app.py                  # Streamlit web GUI entrypoint
+│   ├── pages/                  # Multipage dashboard scripts
 │   ├── components/             # Reusable UI widgets and graphs
-│   └── assets/                 # Web GUI icons & logos
-├── data/                       # Local storage for assets & annotations
-│   ├── videos/                 # Input video sequences
+│   └── assets/                 # App icons, logos, static images
+├── data/                       # Local storage for datasets & calibration
+│   ├── videos/                 # Input traffic videos
 │   ├── frames/                 # Extracted frame sequences
-│   ├── calibration/            # Camera perspective calibration files
+│   ├── calibration/            # Camera perspective matrices
 │   └── annotations/            # Visual model ground truths
-├── demo/                       # Media/recordings showing working demos
-├── docs/                       # Architecture, Installation, API, and Roadmap details
-├── models/                     # Weight files & architecture configs for neural nets
-│   ├── configs/                # Hyperparameter/layer configurations
+├── demo/                       # Media showing working demos
+├── docs/                       # Project documentation
+│   ├── architecture.md
+│   ├── api.md
+│   ├── installation.md
+│   └── roadmap.md
+├── models/                     # Weight files & architecture configs for nets
+│   ├── configs/                # Model parameter/layer files
 │   └── weights/                # Local serialized neural net files (.pt, .onnx)
 ├── outputs/                    # Exported outputs
 │   ├── csv/                    # Recorded traffic logs
 │   ├── snapshots/              # Violation evidence images
-│   ├── processed_video/        # Visualized annotated video files
+│   ├── processed_videos/       # Annotated processed videos
 │   └── logs/                   # System runtime logs
 ├── scripts/                    # Maintenance & executable entrypoints
 │   ├── download_models.py      # Weights downloader script
 │   ├── setup.py                # Setup/install helper
 │   └── run_pipeline.py         # Pipeline manual launch script
 ├── src/                        # Core codebase package
-│   ├── core/                   # Entities and module contracts/interfaces
+│   ├── core/                   # Shared data objects & interface contracts
 │   ├── engines/                # AI processing units (detection, tracking, speed, plate, OCR, violations)
 │   ├── services/               # Integrations (csv reporting, evidence storage)
 │   ├── pipeline/               # Unified orchestration pipeline
-│   └── utils/                  # Coordinate/math & video file manipulation utility functions
-└── tests/                      # Unified testing suites
+│   └── utils/                  # Coordinate/math & video file utility functions
+└── tests/                      # Testing suites
 ```
+
+## Installation
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/deekshanacs/Velox-Vision.git
+   cd Velox-Vision
+   ```
+2. Create and activate a virtual environment:
+   ```bash
+   python -m venv .venv
+   .venv\Scripts\activate
+   ```
+3. Install dependencies:
+   ```bash
+   python -m pip install -r requirements.txt
+   ```
+
+## Usage
+To test the environment and ensure the setup is functional, run:
+```bash
+python app.py
+```
+This should print:
+```
+Welcome to Velox Vision 🏎️
+```
+
+## Future Roadmap
+- [ ] Implement vehicle detection using custom trained YOLOv8 model weights.
+- [ ] Add ByteTrack/DeepSORT integration for tracking unique vehicle IDs.
+- [ ] Integrate pixel-to-meter camera calibration for speed estimation.
+- [ ] Incorporate YOLO-based license plate detection.
+- [ ] Connect EasyOCR to perform character recognition on plates.
+- [ ] Build the overspeed enforcement engine and violation CSV logger.
+- [ ] Create the interactive Streamlit dashboard.
+- [ ] Optimize the pipeline for real-time frame rates and CPU/GPU deployment.
+
+## Tech Stack
+- **Languages**: Python 3.11+
+- **Deep Learning**: Ultralytics (YOLOv8), EasyOCR
+- **Computer Vision Utilities**: OpenCV, Supervision
+- **UI & Web Presentation**: Streamlit
+- **Data Analytics**: Pandas, NumPy, SciPy
+- **Data Formats**: YAML, CSV, JSON
+
+## License
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
