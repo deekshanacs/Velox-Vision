@@ -1,9 +1,17 @@
 import sys
 from unittest.mock import MagicMock, patch
 
-# Mock the ultralytics module to prevent loading torch and its blocked DLLs
-mock_ultralytics = MagicMock()
-sys.modules['ultralytics'] = mock_ultralytics
+# Share global ultralytics mock to prevent pollution across discover test suites
+if 'ultralytics' not in sys.modules:
+    mock_ultralytics = MagicMock()
+    mock_yolo_class = MagicMock()
+    mock_ultralytics.YOLO = mock_yolo_class
+    sys.modules['ultralytics'] = mock_ultralytics
+else:
+    mock_ultralytics = sys.modules['ultralytics']
+    if not hasattr(mock_ultralytics, 'YOLO'):
+        mock_ultralytics.YOLO = MagicMock()
+    mock_yolo_class = mock_ultralytics.YOLO
 
 import unittest
 import numpy as np

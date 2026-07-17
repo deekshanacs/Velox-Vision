@@ -85,13 +85,17 @@ def draw_metadata_label(
     position: tuple,
     bg_color: tuple,
     thickness: int = 1,
-    font_scale: float = 0.4
+    font_scale: float = 0.4,
+    track_id: int = None
 ) -> None:
-    """Draws a multi-line class label (Line 1: Class, Line 2: Confidence) with a padded background."""
+    """Draws a multi-line class label (Line 1: Class + ID, Line 2: Confidence) with a padded background."""
     x, y = position
     font = cv2.FONT_HERSHEY_SIMPLEX
     
-    line1 = class_name.upper()
+    if track_id is not None:
+        line1 = f"{class_name.upper()} #{track_id}"
+    else:
+        line1 = class_name.upper()
     line2 = f"{int(confidence * 100)}%"
     
     # Calculate sizes for both text lines

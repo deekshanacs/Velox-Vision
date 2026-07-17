@@ -59,3 +59,34 @@ reports:
 snapshots:
   # Folder to save the final frame visual preview
   output_dir: "outputs/snapshots/"
+
+tracking:
+  # Enable/disable tracking module
+  enabled: true
+  
+  # Type identifier of the tracker implementation ('bytetrack', 'deepsort')
+  tracker_type: "bytetrack"
+  
+  # Max frames center history positions to record per vehicle
+  history_size: 30
+  
+  # Max frames to retain a lost track before removal
+  max_lost_frames: 30
+  
+  # Number of consecutive frames needed to confirm a track
+  tentative_frames: 3
+  
+  # Enable tracking statistics telemetry tracking
+  metrics_enabled: true
+
+  # ByteTrack specific parameters
+  track_activation_threshold: 0.25
+  minimum_matching_threshold: 0.8
+  track_buffer: 30
+  min_box_area: 10.0
+  frame_rate: 25.0
+  
+  # Visual track indicators configuration
+  visualization:
+    show_trails: false
+    show_ids: true

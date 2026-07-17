@@ -18,6 +18,12 @@ from config.settings import settings
 from src.engines.vehicle_detection.detector_factory import VehicleDetectorFactory
 from src.engines.vehicle_detection.exceptions import DetectionError
 from src.core.entities import DetectionResult, BoundingBox, VehicleDetection
+from src.engines.tracking.factories.tracker_factory import TrackerFactory
+from src.engines.tracking.configuration.tracking_config import TrackingConfiguration
+from src.engines.tracking.entities.tracking_context import TrackingContext
+from src.engines.tracking.value_objects.frame_metadata import FrameMetadata
+from src.engines.tracking.entities.tracked_vehicle import TrackedVehicle
+from src.engines.tracking.entities.track_state import TrackState
 from src.utils.visualization import (
     draw_rounded_rectangle,
     draw_metadata_label,
@@ -83,6 +89,18 @@ class DetectionRunner:
         
         self.warmup_time = time.perf_counter() - start_warmup
         logger.info(f"Detector engine initialized. Warmup duration: {self.warmup_time:.2f} seconds.")
+
+        # Tracker initialization parameters
+        self.tracking_enabled = settings.get("tracking.enabled", True)
+        self.tracker = None
+        if self.tracking_enabled:
+            logger.info("Initializing Object Tracking Engine via factory...")
+            self.tracking_cfg = TrackingConfiguration.from_settings()
+            self.tracker = TrackerFactory.create_tracker(
+                tracker_type=self.tracking_cfg.tracker_type,
+                configs=self.tracking_cfg
+            )
+            logger.info(f"Tracking engine '{self.tracking_cfg.tracker_type}' initialized successfully.")
 
         # Centralize metrics storage
         self.peak_fps = 0.0
@@ -291,6 +309,34 @@ class DetectionRunner:
                 if result.metrics.fps > self.peak_fps:
                     self.peak_fps = result.metrics.fps
 
+                # Track detections
+                tracked_vehicles = None
+                if self.tracker is not None:
+                    temp_det_result = DetectionResult(
+                        detections=filtered_detections,
+                        metrics=result.metrics,
+                        frame_number=processed_frames * self.frame_skip,
+                        timestamp=processed_frames * self.frame_skip / vid_fps,
+                        model_name=self.model_path
+                    )
+                    metadata = FrameMetadata(
+                        frame_number=processed_frames * self.frame_skip,
+                        timestamp=processed_frames * self.frame_skip / vid_fps,
+                        width=vid_width,
+                        height=vid_height,
+                        fps=vid_fps
+                    )
+                    context = TrackingContext(
+                        frame=frame,
+                        detections=temp_det_result,
+                        metadata=metadata
+                    )
+                    try:
+                        tracking_res = self.tracker.track(context)
+                        tracked_vehicles = tracking_res.tracked_vehicles
+                    except Exception as te:
+                        logger.error(f"Tracking error at frame {processed_frames}: {te}")
+
                 # Render annotations
                 avg_inf_time = sum_inference_ms / processed_frames
                 elapsed_sec = time.perf_counter() - start_runtime
@@ -314,7 +360,8 @@ class DetectionRunner:
                     avg_inf_time=avg_inf_time,
                     elapsed_sec=elapsed_sec,
                     eta_sec=eta_sec,
-                    video_fps=vid_fps
+                    video_fps=vid_fps,
+                    tracked_vehicles=tracked_vehicles
                 )
 
                 last_frame = frame.copy()
@@ -386,36 +433,65 @@ class DetectionRunner:
         avg_inf_time: float,
         elapsed_sec: float,
         eta_sec: float,
-        video_fps: float
+        video_fps: float,
+        tracked_vehicles: List[TrackedVehicle] = None
     ) -> None:
         """Renders bounding boxes, labels, and the dashboard HUD on the active frame."""
         h, w, _ = frame.shape
         thickness, font_scale, _ = get_resolution_scaling(h)
 
         # 1. Draw vehicle bounding boxes and class metadata labels
-        for det in detections:
-            color = CLASS_COLORS.get(det.class_name, DEFAULT_COLOR)
-            
-            x1, y1, x2, y2 = det.bbox.x1, det.bbox.y1, det.bbox.x2, det.bbox.y2
-            pt1 = (int(x1), int(y1))
-            pt2 = (int(x2), int(y2))
-            
-            # Draw rounded box
-            draw_rounded_rectangle(frame, pt1, pt2, color, thickness=thickness, r=8)
-            
-            # Position label cleanly on bounding box top border
-            label_pos = (pt1[0], pt1[1] - 5 if pt1[1] > 25 else pt1[1] + 15)
-            
-            # Draw metadata box label
-            draw_metadata_label(
-                frame,
-                class_name=det.class_name,
-                confidence=det.confidence,
-                position=label_pos,
-                bg_color=color,
-                thickness=max(1, thickness - 1),
-                font_scale=font_scale
-            )
+        if tracked_vehicles is not None and self.tracking_enabled:
+            for vehicle in tracked_vehicles:
+                if vehicle.state == TrackState.TEMPORARILY_LOST or vehicle.state == TrackState.REMOVED:
+                    continue
+                color = CLASS_COLORS.get(vehicle.class_name, DEFAULT_COLOR)
+                
+                x1, y1, x2, y2 = vehicle.bbox.x1, vehicle.bbox.y1, vehicle.bbox.x2, vehicle.bbox.y2
+                pt1 = (int(x1), int(y1))
+                pt2 = (int(x2), int(y2))
+                
+                # Draw rounded box
+                draw_rounded_rectangle(frame, pt1, pt2, color, thickness=thickness, r=8)
+                
+                # Position label cleanly on bounding box top border
+                label_pos = (pt1[0], pt1[1] - 5 if pt1[1] > 25 else pt1[1] + 15)
+                
+                # Draw metadata box label with track_id
+                draw_metadata_label(
+                    frame,
+                    class_name=vehicle.class_name,
+                    confidence=vehicle.confidence,
+                    position=label_pos,
+                    bg_color=color,
+                    thickness=max(1, thickness - 1),
+                    font_scale=font_scale,
+                    track_id=vehicle.track_id
+                )
+        else:
+            for det in detections:
+                color = CLASS_COLORS.get(det.class_name, DEFAULT_COLOR)
+                
+                x1, y1, x2, y2 = det.bbox.x1, det.bbox.y1, det.bbox.x2, det.bbox.y2
+                pt1 = (int(x1), int(y1))
+                pt2 = (int(x2), int(y2))
+                
+                # Draw rounded box
+                draw_rounded_rectangle(frame, pt1, pt2, color, thickness=thickness, r=8)
+                
+                # Position label cleanly on bounding box top border
+                label_pos = (pt1[0], pt1[1] - 5 if pt1[1] > 25 else pt1[1] + 15)
+                
+                # Draw metadata box label
+                draw_metadata_label(
+                    frame,
+                    class_name=det.class_name,
+                    confidence=det.confidence,
+                    position=label_pos,
+                    bg_color=color,
+                    thickness=max(1, thickness - 1),
+                    font_scale=font_scale
+                )
 
         # 2. Draw transparency HUD Dashboard at top of the frame
         draw_hud_dashboard(
