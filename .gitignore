@@ -93,3 +93,12 @@ pythonfiles/
 # OS metadata
 .DS_Store
 Thumbs.db
+
+# Velox Vision datasets and outputs
+data/**/*.mp4
+data/**/*.avi
+data/**/*.mov
+outputs/**/*.mp4
+outputs/**/*.avi
+outputs/**/*.mov
+outputs/**/*.csv

@@ -2,7 +2,6 @@ import time
 import logging
 from typing import List, Optional
 import numpy as np
-from ultralytics import YOLO
 
 from config.settings import settings
 from src.core.interfaces import IVehicleDetector
@@ -100,11 +99,13 @@ class YOLOVehicleDetector(IVehicleDetector):
     def _load_model(self) -> None:
         """Loads model weights, falling back to backup weights if primary fails."""
         try:
+            from ultralytics import YOLO
             self.model = YOLO(self.model_path)
             logger.info(f"Successfully loaded primary model weights: '{self.model_path}'")
         except Exception as e:
             logger.warning(f"Could not load primary model '{self.model_path}' ({e}). Attempting fallback...")
             try:
+                from ultralytics import YOLO
                 self.model = YOLO(self.fallback_path)
                 self.model_path = self.fallback_path
                 logger.info(f"Successfully loaded fallback model weights: '{self.fallback_path}'")

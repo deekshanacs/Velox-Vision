@@ -43,6 +43,11 @@ class VehicleDetectorFactory:
                 warmup=warmup,
                 classes=classes
             )
+        elif detector_type_lower in ("simulated", "mock"):
+            from src.engines.vehicle_detection.simulated_detector import SimulatedVehicleDetector
+            return SimulatedVehicleDetector(
+                confidence_threshold=confidence_threshold or 0.25
+            )
         else:
             error_msg = f"Unsupported vehicle detector type: '{detector_type}'"
             logger.error(error_msg)

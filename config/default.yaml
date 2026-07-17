@@ -22,3 +22,16 @@ detection:
     - motorcycle
     - bus
     - truck
+
+runner:
+  # Default input video file path relative to project root
+  input_video: "data/videos/traffic.mp4"
+  
+  # Target output directory
+  output_dir: "outputs/processed_videos/"
+  
+  # Display OpenCV preview window during execution
+  show_preview: true
+  
+  # Save the annotated frames to output video file
+  save_output: true
