@@ -57,26 +57,16 @@ class DetectionRunner:
         self.warmup = settings.get("detection.warmup", True)
         self.classes = settings.get("detection.classes", ["car", "motorcycle", "bus", "truck"])
 
-        # Instantiate target detector engine with automatic simulated fallback
+        # Instantiate target detector engine
         logger.info("Initializing Vehicle Detection Engine via factory...")
-        try:
-            self.detector = VehicleDetectorFactory.create_detector(
-                detector_type="yolo",
-                model_path=self.model_path,
-                confidence_threshold=self.confidence_threshold,
-                device=self.device,
-                warmup=self.warmup,
-                classes=self.classes
-            )
-        except Exception as e:
-            logger.warning(
-                f"YOLO detector load failed due to environment constraints: {e}\n"
-                f"Attempting fallback initialization using SimulatedVehicleDetector..."
-            )
-            self.detector = VehicleDetectorFactory.create_detector(
-                detector_type="simulated",
-                confidence_threshold=self.confidence_threshold
-            )
+        self.detector = VehicleDetectorFactory.create_detector(
+            detector_type="yolo",
+            model_path=self.model_path,
+            confidence_threshold=self.confidence_threshold,
+            device=self.device,
+            warmup=self.warmup,
+            classes=self.classes
+        )
         logger.info("Detector engine initialized successfully.")
 
     def _resolve_video_path(self, requested_path: str) -> str:
