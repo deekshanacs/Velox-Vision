@@ -34,6 +34,28 @@ from src.engines.tracking.motion import (
     Trajectory,
     TrajectoryStatistics
 )
+from src.engines.tracking.entities.perception_profile import PerceptionProfile
+from src.engines.tracking.speed import (
+    SpeedEngine,
+    SpeedProfile,
+    CalibrationMode,
+    SpeedCalibration,
+    PerspectiveTransformer,
+    SpeedSmoother
+)
+from src.engines.tracking.lane import (
+    LaneEngine,
+    LaneProfile,
+    LaneObservation,
+    LaneAssignmentStatus,
+    RoadModel,
+    Lane,
+    LaneBoundary,
+    LaneCenterline,
+    LaneGeometryCalculator,
+    LaneGeometryMetrics,
+    LaneValidator
+)
 
 __all__ = [
     "Tracker",
@@ -65,5 +87,25 @@ __all__ = [
     "MotionState",
     "MotionVector",
     "Trajectory",
-    "TrajectoryStatistics"
+    "TrajectoryStatistics",
+    "SpeedEngine",
+    "SpeedProfile",
+    "CalibrationMode",
+    "SpeedCalibration",
+    "PerspectiveTransformer",
+    "SpeedSmoother",
+    "PerceptionProfile",
+    "LaneEngine",
+    "LaneProfile",
+    "LaneObservation",
+    "LaneAssignmentStatus",
+    "RoadModel",
+    "Lane",
+    "LaneBoundary",
+    "LaneCenterline",
+    "LaneGeometryCalculator",
+    "LaneGeometryMetrics",
+    "LaneValidator"
 ]
+
+

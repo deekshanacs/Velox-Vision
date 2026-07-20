@@ -45,6 +45,28 @@ class TrackingConfiguration:
     motion_smoothing_window: int = 8
     motion_confidence_threshold: float = 0.5
 
+    # Speed Estimation Subsystem Parameters (Phase 4.2)
+    speed_enabled: bool = True
+    speed_smoothing_window: int = 8
+    speed_minimum_motion_distance: float = 5.0
+    speed_pixel_to_meter_ratio: float = 0.05
+    speed_perspective_enabled: bool = False
+    speed_confidence_threshold: float = 0.6
+    speed_smoothing_method: str = "MOVING_AVERAGE"
+    speed_max_speed_jump_kmh: float = 60.0
+
+    # Lane Intelligence Subsystem Parameters (Phase 4.3)
+    lane_enabled: bool = True
+    lane_count: int = 3
+    lane_width: float = 120.0
+    lane_boundary_margin: float = 15.0
+    lane_confidence_threshold: float = 0.6
+    lane_road_start_x: float = 0.0
+    lane_coordinate_system: str = "image"
+    lane_origin: str = "left"
+    lane_orientation: str = "vertical"
+    lane_hysteresis_frames: int = 3
+
     @classmethod
     def from_settings(cls) -> 'TrackingConfiguration':
         """Constructs tracking configurations using current system settings values."""
@@ -87,5 +109,29 @@ class TrackingConfiguration:
             motion_stationary_threshold=settings.get("motion.stationary_threshold", 2.5),
             motion_heading_window=settings.get("motion.heading_window", 10),
             motion_smoothing_window=settings.get("motion.smoothing_window", 8),
-            motion_confidence_threshold=settings.get("motion.confidence_threshold", 0.5)
+            motion_confidence_threshold=settings.get("motion.confidence_threshold", 0.5),
+
+            # Speed Loaders
+            speed_enabled=settings.get("speed.enabled", True),
+            speed_smoothing_window=settings.get("speed.smoothing_window", 8),
+            speed_minimum_motion_distance=settings.get("speed.minimum_motion_distance", 5.0),
+            speed_pixel_to_meter_ratio=settings.get("speed.pixel_to_meter_ratio", 0.05),
+            speed_perspective_enabled=settings.get("speed.perspective_enabled", False),
+            speed_confidence_threshold=settings.get("speed.confidence_threshold", 0.6),
+            speed_smoothing_method=settings.get("speed.smoothing_method", "MOVING_AVERAGE"),
+            speed_max_speed_jump_kmh=settings.get("speed.max_speed_jump_kmh", 60.0),
+
+            # Lane Loaders
+            lane_enabled=settings.get("lane.enabled", True),
+            lane_count=settings.get("lane.lane_count", 3),
+            lane_width=settings.get("lane.lane_width", 120.0),
+            lane_boundary_margin=settings.get("lane.boundary_margin", 15.0),
+            lane_confidence_threshold=settings.get("lane.confidence_threshold", 0.6),
+            lane_road_start_x=settings.get("lane.road_start_x", 0.0),
+            lane_coordinate_system=settings.get("lane.coordinate_system", "image"),
+            lane_origin=settings.get("lane.lane_origin", "left"),
+            lane_orientation=settings.get("lane.orientation", "vertical"),
+            lane_hysteresis_frames=settings.get("lane.hysteresis_frames", 3)
         )
+
+

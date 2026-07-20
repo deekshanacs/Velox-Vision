@@ -7,6 +7,7 @@ from src.engines.tracking.value_objects.velocity import Velocity
 from src.engines.tracking.value_objects.point import Point
 from src.engines.tracking.memory.vehicle_memory import VehicleMemory
 from src.engines.tracking.motion.motion_history import MotionProfile
+from src.engines.tracking.entities.perception_profile import PerceptionProfile
 
 
 @dataclass
@@ -31,6 +32,9 @@ class TrackedVehicle:
     ):
         self.track_id = track_id
         self._motion_profile = None
+        self._speed_profile = None
+        self._perception_profile = PerceptionProfile()
+
         if memory is not None:
             self.memory = memory
         else:
@@ -164,9 +168,40 @@ class TrackedVehicle:
         return {}
 
     @property
+    def perception(self) -> PerceptionProfile:
+        return self._perception_profile
+
+    @property
+    def perception_profile(self) -> PerceptionProfile:
+        return self._perception_profile
+
+
+    @property
     def motion_profile(self) -> Optional[MotionProfile]:
-        return getattr(self, "_motion_profile", None)
+        return self._perception_profile.motion
 
     @motion_profile.setter
     def motion_profile(self, value: Optional[MotionProfile]) -> None:
+        self._perception_profile.motion = value
         self._motion_profile = value
+
+    @property
+    def speed_profile(self):
+        return self._perception_profile.speed
+
+    @speed_profile.setter
+    def speed_profile(self, value) -> None:
+        self._perception_profile.speed = value
+        self._speed_profile = value
+        if value is not None and hasattr(value, 'current_speed_kmh'):
+            self.memory.estimated_speed_kmh = value.current_speed_kmh
+
+    @property
+    def lane_profile(self):
+        return self._perception_profile.lane
+
+    @lane_profile.setter
+    def lane_profile(self, value) -> None:
+        self._perception_profile.lane = value
+
+

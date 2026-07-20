@@ -27,9 +27,11 @@ class TrackingReportGenerator:
         timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
         report_data = {
             "report_id": report_id,
+            "build_version": "v0.4.3",
             "timestamp": timestamp,
             "git": git_info,
             "hardware": hardware_info,
+
             "configuration": {
                 "tracker_type": configs.tracker_type if hasattr(configs, "tracker_type") else "N/A",
                 "history_size": configs.history_size if hasattr(configs, "history_size") else 30,

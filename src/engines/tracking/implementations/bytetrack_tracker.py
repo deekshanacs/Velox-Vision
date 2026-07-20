@@ -61,8 +61,39 @@ class ByteTrackTracker(Tracker):
                     confidence_threshold=configs.motion_confidence_threshold
                 )
 
+            # Instantiate Speed Estimation Engine (Phase 4.2)
+            self._speed_engine = None
+            if getattr(configs, 'speed_enabled', True):
+                from src.engines.tracking.speed import SpeedEngine, SpeedCalibration, SpeedSmoother, SmoothingMethod
+                calib = SpeedCalibration(pixel_to_meter_ratio=configs.speed_pixel_to_meter_ratio)
+                smoother = SpeedSmoother(
+                    method=SmoothingMethod(configs.speed_smoothing_method),
+                    window_size=configs.speed_smoothing_window,
+                    max_speed_jump_kmh=configs.speed_max_speed_jump_kmh
+                )
+                self._speed_engine = SpeedEngine(calibration=calib, smoother=smoother)
+
+            # Instantiate Lane Intelligence Engine (Phase 4.3)
+            self._lane_engine = None
+            if getattr(configs, 'lane_enabled', True):
+                from src.engines.tracking.lane import LaneEngine, LaneConfiguration
+                lane_cfg = LaneConfiguration(
+                    enabled=configs.lane_enabled,
+                    lane_count=configs.lane_count,
+                    lane_width=configs.lane_width,
+                    boundary_margin=configs.lane_boundary_margin,
+                    confidence_threshold=configs.lane_confidence_threshold,
+                    road_start_x=configs.lane_road_start_x,
+                    coordinate_system=configs.lane_coordinate_system,
+                    lane_origin=configs.lane_origin,
+                    orientation=configs.lane_orientation,
+                    hysteresis_frames=configs.lane_hysteresis_frames
+                )
+                self._lane_engine = LaneEngine(config=lane_cfg)
+
             self._is_initialized = True
-            logger.info("ByteTrack tracker successfully initialized.")
+            logger.info("ByteTrack tracker successfully initialized with Motion, Speed, and Lane engines.")
+
         except Exception as e:
             err_msg = f"Failed to initialize ByteTrack tracker: {e}"
             logger.error(err_msg, exc_info=True)
@@ -139,10 +170,22 @@ class ByteTrackTracker(Tracker):
                     self._statistics.tracks_created += 1
                     logger.debug(f"Track {tid} CREATED as tentative at frame {frame_num}")
 
-                # Compute motion profile analytics
+                # Compute motion profile analytics (Phase 4.1)
                 if self._motion_engine is not None:
                     profile = self._motion_engine.generate_profile(vehicle.memory, vehicle.motion_profile)
                     vehicle.motion_profile = profile
+
+                # Compute speed profile analytics (Phase 4.2)
+                if self._speed_engine is not None and vehicle.motion_profile is not None:
+                    s_profile = self._speed_engine.compute_speed(vehicle.motion_profile, vehicle.memory, self._configs)
+                    vehicle.speed_profile = s_profile
+
+                # Compute lane profile analytics (Phase 4.3)
+                if self._lane_engine is not None and vehicle.motion_profile is not None:
+                    l_profile = self._lane_engine.compute_lane_profile(
+                        vehicle.memory, vehicle.motion_profile, vehicle.speed_profile, self._configs
+                    )
+                    vehicle.lane_profile = l_profile
 
                 tracked_vehicles_output.append(vehicle)
 
@@ -169,6 +212,11 @@ class ByteTrackTracker(Tracker):
             for tid in lost_ids:
                 del self._active_tracks[tid]
                 self._memory_manager.repository.remove(tid)
+                if self._speed_engine is not None:
+                    self._speed_engine.clear_track(tid)
+                if self._lane_engine is not None:
+                    self._lane_engine.clear_track(tid)
+
 
             # 4. Telemetry tracking latencies and output packing
             reconcile_latency = (time.perf_counter() - start_tracking_time) * 1000.0

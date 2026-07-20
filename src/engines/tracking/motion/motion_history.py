@@ -7,11 +7,9 @@ from src.engines.tracking.motion.motion_metrics import BoundingBoxStability, Con
 from src.engines.tracking.motion.trajectory import Trajectory
 from src.engines.tracking.motion.trajectory_statistics import TrajectoryStatistics
 
+from src.engines.tracking.speed.speed_profile import SpeedProfile
+
 # Downstream analysis placeholders
-@dataclass(frozen=True)
-class SpeedProfile:
-    """Placeholder for Phase 4.2 speed metrics."""
-    pass
 
 @dataclass(frozen=True)
 class LaneAssignment:
