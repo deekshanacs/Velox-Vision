@@ -6,6 +6,7 @@ from src.engines.tracking.entities.track_state import TrackState
 from src.engines.tracking.value_objects.velocity import Velocity
 from src.engines.tracking.value_objects.point import Point
 from src.engines.tracking.memory.vehicle_memory import VehicleMemory
+from src.engines.tracking.motion.motion_history import MotionProfile
 
 
 @dataclass
@@ -29,6 +30,7 @@ class TrackedVehicle:
         **kwargs
     ):
         self.track_id = track_id
+        self._motion_profile = None
         if memory is not None:
             self.memory = memory
         else:
@@ -160,3 +162,11 @@ class TrackedVehicle:
     @property
     def attributes(self) -> dict:
         return {}
+
+    @property
+    def motion_profile(self) -> Optional[MotionProfile]:
+        return getattr(self, "_motion_profile", None)
+
+    @motion_profile.setter
+    def motion_profile(self, value: Optional[MotionProfile]) -> None:
+        self._motion_profile = value

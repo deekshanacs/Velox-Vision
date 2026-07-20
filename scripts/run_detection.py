@@ -24,6 +24,12 @@ from src.engines.tracking.entities.tracking_context import TrackingContext
 from src.engines.tracking.value_objects.frame_metadata import FrameMetadata
 from src.engines.tracking.entities.tracked_vehicle import TrackedVehicle
 from src.engines.tracking.entities.track_state import TrackState
+from src.engines.tracking import (
+    TrackingRenderer,
+    TrackingDashboard,
+    TrackingProfiler,
+    TrackingReportGenerator
+)
 from src.utils.visualization import (
     draw_rounded_rectangle,
     draw_metadata_label,
@@ -93,6 +99,14 @@ class DetectionRunner:
         # Tracker initialization parameters
         self.tracking_enabled = settings.get("tracking.enabled", True)
         self.tracker = None
+        self.tracking_renderer = None
+        self.tracking_dashboard = None
+        self.tracking_profiler = None
+        self.tracking_report_gen = None
+        self.selected_track_id = None
+        self._prev_track_states = {}
+        self._active_tracked_vehicles_for_click = []
+
         if self.tracking_enabled:
             logger.info("Initializing Object Tracking Engine via factory...")
             self.tracking_cfg = TrackingConfiguration.from_settings()
@@ -101,6 +115,10 @@ class DetectionRunner:
                 configs=self.tracking_cfg
             )
             logger.info(f"Tracking engine '{self.tracking_cfg.tracker_type}' initialized successfully.")
+            self.tracking_renderer = TrackingRenderer(self.tracking_cfg)
+            self.tracking_dashboard = TrackingDashboard()
+            self.tracking_profiler = TrackingProfiler()
+            self.tracking_report_gen = TrackingReportGenerator(self.reports_dir)
 
         # Centralize metrics storage
         self.peak_fps = 0.0
@@ -244,6 +262,34 @@ class DetectionRunner:
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
             writer = cv2.VideoWriter(output_path, fourcc, vid_fps / self.frame_skip, (vid_width, vid_height))
 
+        # Register Mouse Callbacks for Memory Inspector
+        if self.show_preview and not self.benchmark_mode:
+            try:
+                cv2.namedWindow("Velox Vision - Detection Preview")
+                def on_mouse(event, x, y, flags, param):
+                    if event == cv2.EVENT_LBUTTONDOWN:
+                        clicked_id = None
+                        active_vehicles = getattr(self, "_active_tracked_vehicles_for_click", [])
+                        for vehicle in active_vehicles:
+                            bbox = vehicle.bbox
+                            if bbox and bbox.x1 <= x <= bbox.x2 and bbox.y1 <= y <= bbox.y2:
+                                clicked_id = vehicle.track_id
+                                break
+                        
+                        if clicked_id is not None and clicked_id == self.selected_track_id:
+                            self.selected_track_id = None
+                            logger.info("Interactive Inspector: Cleared selection")
+                        elif clicked_id is not None:
+                            self.selected_track_id = clicked_id
+                            logger.info(f"Interactive Inspector: Selected track ID {clicked_id}")
+                        else:
+                            self.selected_track_id = None
+                            logger.info("Interactive Inspector: Cleared selection")
+
+                cv2.setMouseCallback("Velox Vision - Detection Preview", on_mouse)
+            except Exception as e:
+                logger.warning(f"Could not bind mouse callback (running headless/no GUI): {e}")
+
         # Runtime telemetry variables
         processed_frames = 0
         total_detections_count = 0
@@ -266,11 +312,14 @@ class DetectionRunner:
                     continue
 
                 # Execute detection
+                det_start = self.tracking_profiler.start_segment("detection") if self.tracking_profiler else 0
                 try:
                     result: DetectionResult = self.detector.detect(frame, frame_number=processed_frames)
                 except DetectionError as de:
                     logger.error(f"Detector error at frame {processed_frames}: {de}")
                     continue
+                if self.tracking_profiler:
+                    self.tracking_profiler.end_segment("detection", det_start)
 
                 processed_frames += 1
 
@@ -331,11 +380,14 @@ class DetectionRunner:
                         detections=temp_det_result,
                         metadata=metadata
                     )
+                    track_start = self.tracking_profiler.start_segment("tracking") if self.tracking_profiler else 0
                     try:
                         tracking_res = self.tracker.track(context)
                         tracked_vehicles = tracking_res.tracked_vehicles
                     except Exception as te:
                         logger.error(f"Tracking error at frame {processed_frames}: {te}")
+                    if self.tracking_profiler:
+                        self.tracking_profiler.end_segment("tracking", track_start)
 
                 # Render annotations
                 avg_inf_time = sum_inference_ms / processed_frames
@@ -348,21 +400,71 @@ class DetectionRunner:
                     remaining_frames = (total_frames / self.frame_skip) - processed_frames
                     eta_sec = max(0.0, remaining_frames / avg_fps)
 
+                # Set current tracked vehicles for mouse listener
+                self._active_tracked_vehicles_for_click = tracked_vehicles if tracked_vehicles else []
+
                 # Overlay drawings on frame
-                self._render_frame_annotations(
-                    frame=frame,
-                    detections=filtered_detections,
-                    metrics=result.metrics,
-                    frame_number=processed_frames * self.frame_skip,
-                    total_frames=total_frames,
-                    active_breakdown=active_breakdown,
-                    avg_fps=avg_fps,
-                    avg_inf_time=avg_inf_time,
-                    elapsed_sec=elapsed_sec,
-                    eta_sec=eta_sec,
-                    video_fps=vid_fps,
-                    tracked_vehicles=tracked_vehicles
-                )
+                if self.tracking_renderer is not None:
+                    # Compile debug events
+                    current_states = {}
+                    for vehicle in self._active_tracked_vehicles_for_click:
+                        tid = vehicle.track_id
+                        state = vehicle.state
+                        current_states[tid] = state
+                        
+                        if tid not in self._prev_track_states:
+                            self.tracking_renderer.log_debug_event(f"Track #{tid} ({vehicle.class_name}) created as {state.name}")
+                        else:
+                            prev_state = self._prev_track_states[tid]
+                            if prev_state != state:
+                                self.tracking_renderer.log_debug_event(f"Track #{tid} transitioned {prev_state.name} -> {state.name}")
+                    
+                    for tid in self._prev_track_states:
+                        if tid not in current_states:
+                            self.tracking_renderer.log_debug_event(f"Track #{tid} removed")
+                    self._prev_track_states = current_states
+
+                    # Update class breakdown
+                    self.tracking_dashboard.update_class_breakdown(self._active_tracked_vehicles_for_click)
+                    
+                    # Compile telemetry dictionary
+                    telemetry_dict = self.tracking_dashboard.get_telemetry_dict(
+                        overall_fps=avg_fps,
+                        det_fps=1000.0 / result.metrics.inference_time_ms if result.metrics.inference_time_ms > 0 else 0.0,
+                        perf=self.tracker.get_performance() if self.tracker else None,
+                        stats=self.tracker.get_statistics() if self.tracker else None,
+                        memory_mgr=self.tracker._memory_manager if self.tracker and hasattr(self.tracker, "_memory_manager") else None
+                    )
+                    telemetry_dict["det_latency_ms"] = result.metrics.inference_time_ms
+                    telemetry_dict["track_latency_ms"] = self.tracking_profiler.latencies.get("tracking", 0.0) if self.tracking_profiler else 0.0
+
+                    # Render using tracking renderer (profiled)
+                    render_start = self.tracking_profiler.start_segment("visualization") if self.tracking_profiler else 0
+                    self.tracking_renderer.render(
+                        frame=frame,
+                        tracked_vehicles=self._active_tracked_vehicles_for_click,
+                        telemetry_data=telemetry_dict,
+                        current_frame=processed_frames * self.frame_skip,
+                        total_frames=total_frames,
+                        selected_track_id=self.selected_track_id
+                    )
+                    if self.tracking_profiler:
+                        self.tracking_profiler.end_segment("visualization", render_start)
+                else:
+                    self._render_frame_annotations(
+                        frame=frame,
+                        detections=filtered_detections,
+                        metrics=result.metrics,
+                        frame_number=processed_frames * self.frame_skip,
+                        total_frames=total_frames,
+                        active_breakdown=active_breakdown,
+                        avg_fps=avg_fps,
+                        avg_inf_time=avg_inf_time,
+                        elapsed_sec=elapsed_sec,
+                        eta_sec=eta_sec,
+                        video_fps=vid_fps,
+                        tracked_vehicles=tracked_vehicles
+                    )
 
                 last_frame = frame.copy()
 
@@ -409,6 +511,8 @@ class DetectionRunner:
             snapshot_path = os.path.join(self.snapshots_dir, "final_frame.png")
             cv2.imwrite(snapshot_path, last_frame)
             logger.info(f"Final preview frame snapshot exported to: '{snapshot_path}'")
+            if self.tracking_enabled and self.tracking_report_gen is not None:
+                self.tracking_report_gen.save_final_snapshot(last_frame, self.snapshots_dir)
 
         # Generate summary report exports
         self._generate_execution_reports(
@@ -580,6 +684,49 @@ class DetectionRunner:
                 logger.info(f"Execution summary report successfully saved to: '{report_path}'")
             except Exception as e:
                 logger.error(f"Failed to write execution report file: {e}")
+
+        # Save tracking visualization JSON report
+        if self.tracking_enabled and self.tracking_report_gen is not None:
+            perf = self.tracker.get_performance() if self.tracker else None
+            stats = self.tracker.get_statistics() if self.tracker else None
+            memory_mgr = self.tracker._memory_manager if self.tracker and hasattr(self.tracker, "_memory_manager") else None
+            
+            perf_stats = {
+                "total_latency_ms": perf.total_latency_ms if perf else 0.0,
+                "avg_latency_ms": perf.average_latency_ms if perf else 0.0,
+                "tracking_fps": perf.tracking_fps if perf else 0.0,
+                "pipeline_fps": avg_fps,
+                "processed_frames": frames_processed
+            }
+            track_stats = {
+                "tracks_created": stats.tracks_created if stats else 0,
+                "tracks_removed": stats.tracks_removed if stats else 0,
+                "tracks_lost": stats.tracks_lost if stats else 0,
+                "recovered_tracks": stats.recovered_tracks if stats else 0,
+                "average_track_age": stats.average_track_age if stats else 0.0
+            }
+            mem_stats = {
+                "total_memories": 0,
+                "average_lifetime_frames": 0.0,
+                "estimated_memory_bytes": 0
+            }
+            if memory_mgr:
+                m_stats = memory_mgr.get_statistics()
+                mem_stats = {
+                    "total_memories": m_stats.total_memories,
+                    "average_lifetime_frames": m_stats.average_lifetime_frames,
+                    "estimated_memory_bytes": m_stats.estimated_memory_bytes
+                }
+                
+            self.tracking_report_gen.generate_json_report(
+                report_id=report_id,
+                configs=self.tracking_cfg,
+                perf_stats=perf_stats,
+                track_stats=track_stats,
+                memory_stats=mem_stats,
+                git_info=git_info,
+                hardware_info=hw_info
+            )
 
         # Print structured final benchmark table to stdout
         model_friendly = get_friendly_model_name(self.model_path)

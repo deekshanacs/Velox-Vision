@@ -32,6 +32,7 @@ class ByteTrackTracker(Tracker):
         # This is maintained locally to retain historic trajectories and placeholders
         # for downstream modules (e.g., speed estimation and ANPR characters).
         self._active_tracks: Dict[int, TrackedVehicle] = {}
+        self._motion_engine = None
         
         self._statistics = TrackingStatistics()
         self._performance = TrackingPerformance()
@@ -47,6 +48,19 @@ class ByteTrackTracker(Tracker):
             self._active_tracks.clear()
             self._statistics.reset()
             self._performance.reset()
+            
+            # Instantiate Motion Analytics Engine
+            self._motion_engine = None
+            if configs.motion_enabled:
+                from src.engines.tracking.motion.motion_engine import MotionEngine
+                self._motion_engine = MotionEngine(
+                    minimum_snapshots=configs.motion_minimum_snapshots,
+                    stationary_threshold=configs.motion_stationary_threshold,
+                    heading_window=configs.motion_heading_window,
+                    smoothing_window=configs.motion_smoothing_window,
+                    confidence_threshold=configs.motion_confidence_threshold
+                )
+
             self._is_initialized = True
             logger.info("ByteTrack tracker successfully initialized.")
         except Exception as e:
@@ -124,6 +138,11 @@ class ByteTrackTracker(Tracker):
                     self._active_tracks[tid] = vehicle
                     self._statistics.tracks_created += 1
                     logger.debug(f"Track {tid} CREATED as tentative at frame {frame_num}")
+
+                # Compute motion profile analytics
+                if self._motion_engine is not None:
+                    profile = self._motion_engine.generate_profile(vehicle.memory, vehicle.motion_profile)
+                    vehicle.motion_profile = profile
 
                 tracked_vehicles_output.append(vehicle)
 

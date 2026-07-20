@@ -22,6 +22,18 @@ from src.engines.tracking.exceptions import (
     TrackingRuntimeError,
     InvalidTrackStateError
 )
+from src.engines.tracking.visualization.renderer import TrackingRenderer
+from src.engines.tracking.telemetry.tracking_dashboard import TrackingDashboard
+from src.engines.tracking.telemetry.tracking_profiler import TrackingProfiler
+from src.engines.tracking.telemetry.tracking_report import TrackingReportGenerator
+from src.engines.tracking.motion import (
+    MotionEngine,
+    MotionProfile,
+    MotionState,
+    MotionVector,
+    Trajectory,
+    TrajectoryStatistics
+)
 
 __all__ = [
     "Tracker",
@@ -43,5 +55,15 @@ __all__ = [
     "TrackerInitializationError",
     "TrackingConfigurationError",
     "TrackingRuntimeError",
-    "InvalidTrackStateError"
+    "InvalidTrackStateError",
+    "TrackingRenderer",
+    "TrackingDashboard",
+    "TrackingProfiler",
+    "TrackingReportGenerator",
+    "MotionEngine",
+    "MotionProfile",
+    "MotionState",
+    "MotionVector",
+    "Trajectory",
+    "TrajectoryStatistics"
 ]

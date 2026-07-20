@@ -106,3 +106,23 @@ memory:
   
   # Enable tracking of confidence score metrics history
   confidence_history: true
+
+tracking_visualization:
+  enabled: true
+  show_trails: true
+  trail_length: 40
+  show_memory: true
+  show_states: true
+  show_profiler: true
+  show_dashboard: true
+  debug: false
+
+motion:
+  enabled: true
+  minimum_snapshots: 5
+  stationary_threshold: 2.5
+  heading_window: 10
+  smoothing_window: 8
+  confidence_threshold: 0.5
+
+
